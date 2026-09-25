@@ -1,15 +1,25 @@
 # Disk & RAM Monitor — GNOME Shell Extension
 
 Extensión para GNOME Shell (45 / 46 / 47 / 48 / 49 / 50) que agrega un ícono en el panel
-superior. Al hacer clic despliega un menú con dos barras horizontales tipo
-medidor que muestran, en tiempo real:
+superior. Al hacer clic despliega un menú con una barra horizontal tipo medidor
+por cada **unidad de disco montada** del sistema, más una para la **memoria RAM**,
+mostrando en tiempo real:
 
-- **Capacidad de Disco** (partición raíz `/`): usado / libre / total.
-- **Capacidad de Memoria** (RAM): usado / libre / total.
+- **Unidades de disco**: una barra por cada partición real montada, con su
+  **etiqueta** (o el nombre del dispositivo si no tiene) como título y, debajo,
+  el **dispositivo · modelo físico · punto de montaje**
+  (p. ej. `disco2` → `nvme0n1p1 · Samsung 512GB · /media/usuario/disco2`).
+- **Memoria RAM**: usado / libre / total.
 
 La barra completa representa el 100% de la capacidad; la parte de color es lo
-utilizado y la parte blanca lo libre. Los valores se muestran siempre, sobre
-toda la barra, y la información se actualiza cada pocos segundos.
+utilizado y la parte blanca lo libre. El color pasa a **amarillo** al superar el
+75% y a **rojo** sobre el 90%. Los valores se muestran siempre, sobre toda la
+barra, y la información se actualiza cada pocos segundos. Las unidades se
+detectan automáticamente al conectarlas o desconectarlas (USB, etc.).
+
+Toda la información se obtiene sin privilegios de root: los tamaños vía GIO, las
+etiquetas desde `/dev/disk/by-label` y `/dev/disk/by-partlabel`, y los modelos
+desde `/sys/block/*/device/model`.
 
 ## Instalación
 

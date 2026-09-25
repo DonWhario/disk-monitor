@@ -1,9 +1,17 @@
 {
   "uuid": "disk-ram-monitor@felipe",
   "name": "Disk & RAM Monitor",
-  "description": "Muestra un menú en el panel superior con barras de uso de disco (/) y memoria RAM: capacidad total y usada, estilo medidor. / Shows a top-panel menu with horizontal bars for disk (/) and RAM usage.",
-  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "description": "Muestra un menú en el panel superior con una barra horizontal por cada unidad de disco montada del sistema (con su nombre real) y una para la memoria RAM: cada barra indica la capacidad total y, en un color distinto, la cantidad ocupada. / Shows a top-panel menu with one horizontal bar per mounted disk drive (using real device names) plus RAM: each bar shows total capacity with the used amount in a distinct color.",
+  "shell-version": [
+     "45", 
+     "46", 
+     "47", 
+     "48", 
+     "49", 
+     "50", 
+     "51"
+  ],
   "gettext-domain": "disk-ram-monitor",
-  "version": 6,
+  "version": 8,
   "url": ""
 }
