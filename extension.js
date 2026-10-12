@@ -235,14 +235,14 @@ class MeterRow extends St.BoxLayout {
     _init(name, sub = '') {
         super._init({
             style_class: 'drm-row',
-            vertical: false,
+            orientation: Clutter.Orientation.HORIZONTAL,
             x_expand: true,
         });
 
         // Bloque de nombre: línea principal (etiqueta) + línea de detalle
         // (dispositivo · modelo · montaje).
         this._nameBox = new St.BoxLayout({
-            vertical: true,
+            orientation: Clutter.Orientation.VERTICAL,
             style_class: 'drm-namebox',
             y_align: Clutter.ActorAlign.CENTER,
         });
@@ -273,7 +273,7 @@ class MeterRow extends St.BoxLayout {
 
         // --- Capa 1: proporción de color -----------------------------------
         const colorLayer = new St.BoxLayout({
-            vertical: false,
+            orientation: Clutter.Orientation.HORIZONTAL,
             x_expand: true,
             y_expand: true,
         });
@@ -292,7 +292,7 @@ class MeterRow extends St.BoxLayout {
 
         // --- Capa 2: textos (encima del color) -----------------------------
         const textLayer = new St.BoxLayout({
-            vertical: false,
+            orientation: Clutter.Orientation.HORIZONTAL,
             x_expand: true,
             y_expand: true,
         });
@@ -392,7 +392,7 @@ class Indicator extends PanelMenu.Button {
             can_focus: false,
         });
         this._box = new St.BoxLayout({
-            vertical: true,
+            orientation: Clutter.Orientation.VERTICAL,
             x_expand: true,
             style_class: 'drm-box',
         });
