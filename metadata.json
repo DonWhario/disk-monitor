@@ -1,7 +1,7 @@
 {
   "uuid": "disk-ram-monitor@felipe",
   "name": "Disk & RAM Monitor",
-  "description": "Muestra un menú en el panel superior con una barra horizontal por cada unidad de disco montada del sistema (con su nombre real) y una para la memoria RAM: cada barra indica la capacidad total y, en un color distinto, la cantidad ocupada. / Shows a top-panel menu with one horizontal bar per mounted disk drive (using real device names) plus RAM: each bar shows total capacity with the used amount in a distinct color.",
+  "description": "Barra horizontal por cada unidad de disco montada (con etiqueta, dispositivo y modelo) y para la RAM: capacidad total y uso. Botón 'Analizar uso' que desglosa por colores en qué se ocupa el espacio (Sistema, Aplicaciones, Archivos de usuario, Temporales, Logs...). / A horizontal bar per mounted disk (label, device, model) and for RAM, plus an 'Analyze' button that breaks disk usage down by category with colors.",
   "shell-version": [
      "45", 
      "46", 
@@ -12,6 +12,6 @@
      "51"
   ],
   "gettext-domain": "disk-ram-monitor",
-  "version": 9,
+  "version": 10,
   "url": ""
 }

@@ -103,3 +103,70 @@
     font-weight: 600;
     text-align: right;
 }
+
+/* ---- Desglose por categorías -------------------------------------------- */
+
+.drm-entry {
+    spacing: 4px;
+}
+
+/* Botón "Analizar uso" */
+.drm-analyze {
+    color: inherit;
+    font-size: 11px;
+    padding: 2px 10px;
+    border: 1px solid rgba(128, 128, 128, 0.5);
+    border-radius: 100px;
+}
+
+.drm-analyze:hover {
+    background-color: rgba(128, 128, 128, 0.18);
+}
+
+/* Barra segmentada: fondo = espacio libre */
+.drm-segbar {
+    height: 16px;
+    border: 1px solid #8fb0e0;
+    border-radius: 4px;
+    background-color: #ffffff;
+    margin-left: 202px;   /* alinea bajo la barra principal (190 name + 12 spacing) */
+}
+
+.drm-legend {
+    spacing: 2px;
+    padding: 4px 0 2px 202px;
+}
+
+.drm-legrow {
+    spacing: 8px;
+}
+
+.drm-legtext {
+    color: inherit;
+    font-size: 11px;
+}
+
+/* Cuadro de color de la leyenda */
+.drm-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+/* Colores de las categorías (barra raíz "/") */
+.drm-seg-sistema { background-color: #5b8ff9; }   /* azul */
+.drm-seg-apps    { background-color: #61c766; }   /* verde */
+.drm-seg-usuario { background-color: #f2a24a; }   /* naranja */
+.drm-seg-temp    { background-color: #b07de0; }   /* morado */
+.drm-seg-logs    { background-color: #e86f6f; }   /* rojo */
+.drm-seg-otros   { background-color: #9aa0a6; }   /* gris */
+
+/* Colores para el desglose por carpetas (otras unidades) */
+.drm-seg-seg0 { background-color: #5b8ff9; }
+.drm-seg-seg1 { background-color: #61c766; }
+.drm-seg-seg2 { background-color: #f2a24a; }
+.drm-seg-seg3 { background-color: #b07de0; }
+.drm-seg-seg4 { background-color: #e86f6f; }
+.drm-seg-seg5 { background-color: #4bc0c0; }   /* turquesa */
+.drm-seg-seg6 { background-color: #c7cad1; }   /* gris claro */

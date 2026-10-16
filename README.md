@@ -21,6 +21,24 @@ Toda la información se obtiene sin privilegios de root: los tamaños vía GIO, 
 etiquetas desde `/dev/disk/by-label` y `/dev/disk/by-partlabel`, y los modelos
 desde `/sys/block/*/device/model`.
 
+## Análisis de uso por categorías
+
+Cada unidad incluye un botón **«Analizar uso»** que escanea el disco en segundo
+plano (con `du`, sin congelar el escritorio) y pinta una **barra segmentada por
+colores** con una leyenda, mostrando en qué se ocupa el espacio:
+
+- 🟦 **Sistema** (`/usr`, `/boot`, `/etc`, `/lib`...)
+- 🟩 **Aplicaciones** (Flatpak, Snap, `/opt`)
+- 🟧 **Archivos de usuario** (`/home`)
+- 🟪 **Temporales y caché** (`/tmp`, `/var/tmp`, `/var/cache`)
+- 🟥 **Registros** (`/var/log`)
+- ⬜ **Otros / sin clasificar**
+
+En unidades de datos (no la raíz) el desglose se hace por **carpetas de nivel
+superior**. Notas: es **bajo demanda** (no en tiempo real), la clasificación es
+**heurística por carpetas**, y lo que requiera privilegios de root que no se
+pueda leer se contabiliza en «Otros».
+
 ## Instalación
 
 ### Opción A — desde el archivo `.zip`

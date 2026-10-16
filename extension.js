@@ -228,6 +228,134 @@ function readRam() {
     }
 }
 
+// ---- Análisis de uso por categorías ---------------------------------------
+//
+// El sistema solo informa total/usado/libre. Para saber EN QUÉ se usa el
+// espacio hay que escanear el disco (como «du»). Esto es costoso, así que se
+// hace bajo demanda y en un subproceso asíncrono para no congelar GNOME Shell.
+
+// Categorías del sistema de archivos raíz «/». Cada categoría agrupa rutas
+// DISJUNTAS (ninguna es subcarpeta de otra) para no contar dos veces.
+function rootBuckets() {
+    return [
+        {key: 'sistema', label: 'Sistema',
+            paths: ['/usr', '/boot', '/etc', '/lib', '/lib64', '/bin', '/sbin']},
+        {key: 'apps', label: 'Aplicaciones',
+            paths: ['/opt', '/var/lib/flatpak', '/snap']},
+        {key: 'usuario', label: 'Archivos de usuario',
+            paths: ['/home']},
+        {key: 'temp', label: 'Temporales y caché',
+            paths: ['/tmp', '/var/tmp', '/var/cache']},
+        {key: 'logs', label: 'Registros (logs)',
+            paths: ['/var/log']},
+    ];
+}
+
+// Ejecuta «du -xsb» sobre una lista de rutas y devuelve, vía callback, un
+// Map<ruta, bytes>. -x = no cruzar a otros sistemas de archivos; -s = total;
+// -b = bytes (tamaño aparente). stderr silenciado (errores de permisos).
+function duSizes(paths, cancellable, cb) {
+    const existing = paths.filter(p => GLib.file_test(p, GLib.FileTest.EXISTS));
+    if (existing.length === 0) {
+        cb(new Map());
+        return;
+    }
+    let proc;
+    try {
+        proc = Gio.Subprocess.new(
+            ['du', '-xsb', '--', ...existing],
+            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+    } catch (e) {
+        logError(e, 'disk-ram-monitor: no se pudo lanzar du');
+        cb(new Map());
+        return;
+    }
+    proc.communicate_utf8_async(null, cancellable, (p, res) => {
+        if (cancellable && cancellable.is_cancelled())
+            return;
+        const map = new Map();
+        try {
+            const [, stdout] = p.communicate_utf8_finish(res);
+            for (const line of (stdout || '').split('\n')) {
+                const m = line.match(/^(\d+)\s+(.*)$/);
+                if (m)
+                    map.set(m[2], parseInt(m[1], 10));
+            }
+        } catch (e) {
+            // cancelado o error: se devuelve lo que haya
+        }
+        cb(map);
+    });
+}
+
+// Ajusta los segmentos para que encajen en el «usado» real del sistema de
+// archivos (du usa tamaño aparente; df usa bloques, pueden diferir). Si la
+// suma excede lo usado, se escala; si falta, se añade un bucket «Otros».
+function reconcile(result, usedTotal, otrosLabel) {
+    let sum = result.reduce((s, r) => s + r.bytes, 0);
+    if (sum > usedTotal && sum > 0) {
+        const f = usedTotal / sum;
+        result = result.map(r => ({...r, bytes: r.bytes * f}));
+        sum = usedTotal;
+    }
+    const otros = Math.max(0, usedTotal - sum);
+    if (otros > 0)
+        result.push({key: 'otros', label: otrosLabel, bytes: otros});
+    return result;
+}
+
+// Analiza un punto de montaje y devuelve, vía callback, un array de
+// {key, label, bytes} ordenado, listo para pintar.
+function analyzeMount(mount, usedTotal, cancellable, cb) {
+    if (mount === '/') {
+        // Categorías fijas del sistema.
+        const buckets = rootBuckets();
+        const allPaths = buckets.flatMap(b => b.paths);
+        duSizes(allPaths, cancellable, (sizes) => {
+            const result = buckets
+                .map(b => ({
+                    key: b.key,
+                    label: b.label,
+                    bytes: b.paths.reduce((s, p) => s + (sizes.get(p) || 0), 0),
+                }))
+                .filter(r => r.bytes > 0)
+                .sort((a, b) => b.bytes - a.bytes);
+            cb(reconcile(result, usedTotal, 'Otros / sin clasificar'));
+        });
+    } else {
+        // Otras unidades (datos): desglose por carpetas de nivel superior.
+        const children = [];
+        try {
+            const d = Gio.File.new_for_path(mount);
+            const en = d.enumerate_children(
+                'standard::name', Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
+            let info;
+            const base = mount.replace(/\/+$/, '');
+            while ((info = en.next_file(null)) !== null) {
+                const name = info.get_name();
+                if (name === 'lost+found')
+                    continue;
+                children.push(`${base}/${name}`);
+            }
+        } catch (e) {
+            // sin permiso de lectura del directorio: se deja vacío
+        }
+        duSizes(children, cancellable, (sizes) => {
+            let entries = [...sizes.entries()]
+                .map(([p, b]) => ({label: GLib.path_get_basename(p), bytes: b}))
+                .sort((a, b) => b.bytes - a.bytes);
+            const top = entries.slice(0, 6);
+            const restBytes = entries.slice(6).reduce((s, e) => s + e.bytes, 0);
+            const result = top.map((e, i) => ({
+                key: `seg${i}`, label: e.label, bytes: e.bytes,
+            }));
+            if (restBytes > 0)
+                result.push({key: 'seg6', label: 'Otras carpetas', bytes: restBytes});
+            cb(reconcile(result, usedTotal, 'Otros / no legible'));
+        });
+    }
+}
+
 // ---- Widget de una fila (nombre + barra + total) --------------------------
 
 const MeterRow = GObject.registerClass(
@@ -364,6 +492,123 @@ class SectionLabel extends St.Label {
     }
 });
 
+// ---- Desglose por categorías (barra segmentada + leyenda) -----------------
+
+const BreakdownBox = GObject.registerClass(
+class BreakdownBox extends St.BoxLayout {
+    _init() {
+        super._init({
+            orientation: Clutter.Orientation.VERTICAL,
+            x_expand: true,
+            style_class: 'drm-breakdown',
+        });
+
+        // Barra segmentada: cada segmento de color = una categoría. El resto
+        // (hasta BAR_WIDTH) queda con el fondo = espacio libre.
+        this._bar = new St.BoxLayout({
+            orientation: Clutter.Orientation.HORIZONTAL,
+            style_class: 'drm-segbar',
+            width: BAR_WIDTH,
+            clip_to_allocation: true,
+        });
+        this.add_child(this._bar);
+
+        // Leyenda con color + etiqueta + tamaño por categoría.
+        this._legend = new St.BoxLayout({
+            orientation: Clutter.Orientation.VERTICAL,
+            style_class: 'drm-legend',
+        });
+        this.add_child(this._legend);
+    }
+
+    setData(result, capacity) {
+        this._bar.destroy_all_children();
+        this._legend.destroy_all_children();
+
+        const inner = BAR_WIDTH - 2;
+        for (const r of result) {
+            const w = capacity > 0
+                ? Math.max(0, Math.round((r.bytes / capacity) * inner))
+                : 0;
+            // Segmento de la barra.
+            this._bar.add_child(new St.Widget({
+                style_class: `drm-seg drm-seg-${r.key}`,
+                width: w,
+                y_expand: true,
+            }));
+
+            // Fila de leyenda.
+            const lrow = new St.BoxLayout({
+                orientation: Clutter.Orientation.HORIZONTAL,
+                style_class: 'drm-legrow',
+            });
+            lrow.add_child(new St.Widget({
+                style_class: `drm-seg drm-seg-${r.key} drm-swatch`,
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+            lrow.add_child(new St.Label({
+                text: `${r.label} — ${fmtSize(r.bytes)}`,
+                style_class: 'drm-legtext',
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+            this._legend.add_child(lrow);
+        }
+    }
+});
+
+// Entrada de disco: fila medidor + botón «Analizar» + desglose (oculto).
+const DiskEntry = GObject.registerClass(
+class DiskEntry extends St.BoxLayout {
+    _init(disk, getCancellable) {
+        super._init({
+            orientation: Clutter.Orientation.VERTICAL,
+            x_expand: true,
+            style_class: 'drm-entry',
+        });
+        this._mount = disk.mount;
+        this._getCancellable = getCancellable;
+        this._used = 0;
+        this._total = 0;
+
+        this.row = new MeterRow(disk.name, disk.sub);
+        this.add_child(this.row);
+
+        this._btn = new St.Button({
+            label: 'Analizar uso',
+            style_class: 'drm-analyze',
+            x_align: Clutter.ActorAlign.START,
+        });
+        this._btn.connect('clicked', () => this._analyze());
+        this.add_child(this._btn);
+
+        this._breakdown = new BreakdownBox();
+        this._breakdown.visible = false;
+        this.add_child(this._breakdown);
+    }
+
+    update(used, total) {
+        this._used = used;
+        this._total = total;
+        this.row.update(used, total);
+    }
+
+    _analyze() {
+        this._btn.reactive = false;
+        this._btn.label = 'Analizando…';
+        const total = this._total;
+        analyzeMount(this._mount, this._used, this._getCancellable(), (result) => {
+            // El widget puede haberse destruido mientras escaneaba.
+            if (!this._breakdown || this._breakdown.get_stage() === null) {
+                return;
+            }
+            this._breakdown.setData(result, total);
+            this._breakdown.visible = true;
+            this._btn.label = 'Volver a analizar';
+            this._btn.reactive = true;
+        });
+    }
+});
+
 // ---- Indicador del panel ---------------------------------------------------
 
 const Indicator = GObject.registerClass(
@@ -400,15 +645,19 @@ class Indicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._item);
 
         // Estado interno.
-        this._diskRows = new Map();     // device -> MeterRow
+        this._diskRows = new Map();     // device -> DiskEntry
         this._ramRow = null;
         this._diskKey = '';             // firma del conjunto de discos actual
+        this._cancellable = new Gio.Cancellable();
 
         // Refrescar al abrir el menú.
         this.menu.connect('open-state-changed', (_menu, open) => {
             if (open)
                 this._refresh();
         });
+
+        // Cancelar cualquier escaneo en curso al destruir el indicador.
+        this.connect('destroy', () => this._cancellable.cancel());
     }
 
     // (Re)construye las filas si cambió el conjunto de discos montados.
@@ -424,9 +673,9 @@ class Indicator extends PanelMenu.Button {
             }));
         }
         for (const disk of disks) {
-            const row = new MeterRow(disk.name, disk.sub);
-            this._box.add_child(row);
-            this._diskRows.set(disk.device, row);
+            const entry = new DiskEntry(disk, () => this._cancellable);
+            this._box.add_child(entry);
+            this._diskRows.set(disk.device, entry);
         }
 
         this._box.add_child(new SectionLabel('Memoria RAM'));
