@@ -23,9 +23,12 @@ desde `/sys/block/*/device/model`.
 
 ## Análisis de uso por categorías
 
-Cada unidad incluye un botón **«Analizar uso»** que escanea el disco en segundo
-plano (con `du`, sin congelar el escritorio) y pinta una **barra segmentada por
-colores** con una leyenda, mostrando en qué se ocupa el espacio:
+La barra de cada unidad es un **gráfico segmentado por colores** que muestra en
+qué se ocupa el espacio. El escaneo (con `du`, en segundo plano, sin congelar el
+escritorio) se ejecuta **automáticamente al iniciar sesión y se repite cada 4
+horas** — no hay ningún botón.
+
+Categorías (barra de la raíz `/`):
 
 - 🟦 **Sistema** (`/usr`, `/boot`, `/etc`, `/lib`...)
 - 🟩 **Aplicaciones** (Flatpak, Snap, `/opt`)
@@ -34,10 +37,13 @@ colores** con una leyenda, mostrando en qué se ocupa el espacio:
 - 🟥 **Registros** (`/var/log`)
 - ⬜ **Otros / sin clasificar**
 
+La **leyenda de colores** aparece en horizontal en la **parte inferior** del
+menú. Al **pasar el cursor** sobre cualquier segmento se muestra un tooltip con
+la **categoría y su porcentaje**.
+
 En unidades de datos (no la raíz) el desglose se hace por **carpetas de nivel
-superior**. Notas: es **bajo demanda** (no en tiempo real), la clasificación es
-**heurística por carpetas**, y lo que requiera privilegios de root que no se
-pueda leer se contabiliza en «Otros».
+superior**. Notas: la clasificación es **heurística por carpetas** y lo que
+requiera privilegios de root que no se pueda leer se contabiliza en «Otros».
 
 ## Instalación
 

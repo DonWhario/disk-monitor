@@ -106,39 +106,25 @@
 
 /* ---- Desglose por categorías -------------------------------------------- */
 
-.drm-entry {
-    spacing: 4px;
-}
-
-/* Botón "Analizar uso" */
-.drm-analyze {
-    color: inherit;
+/* Tooltip flotante (categoría + porcentaje al pasar el cursor) */
+.drm-tooltip {
+    background-color: rgba(0, 0, 0, 0.85);
+    color: #ffffff;
     font-size: 11px;
-    padding: 2px 10px;
-    border: 1px solid rgba(128, 128, 128, 0.5);
-    border-radius: 100px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
-.drm-analyze:hover {
-    background-color: rgba(128, 128, 128, 0.18);
-}
-
-/* Barra segmentada: fondo = espacio libre */
-.drm-segbar {
-    height: 16px;
-    border: 1px solid #8fb0e0;
-    border-radius: 4px;
-    background-color: #ffffff;
-    margin-left: 202px;   /* alinea bajo la barra principal (190 name + 12 spacing) */
-}
-
-.drm-legend {
-    spacing: 2px;
-    padding: 4px 0 2px 202px;
+/* Leyenda horizontal en la parte inferior del menú */
+.drm-legend-footer {
+    spacing: 14px;
+    padding: 4px 2px 2px 2px;
 }
 
 .drm-legrow {
-    spacing: 8px;
+    spacing: 6px;
 }
 
 .drm-legtext {

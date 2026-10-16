@@ -23,8 +23,9 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
-const REFRESH_SECONDS = 3;      // cada cuánto se actualizan los datos
-const BAR_WIDTH = 240;          // ancho de la barra en píxeles
+const REFRESH_SECONDS = 3;          // refresco ligero (RAM, detección de discos)
+const ANALYZE_SECONDS = 4 * 60 * 60; // re-análisis por categorías: cada 4 horas
+const BAR_WIDTH = 240;              // ancho de la barra en píxeles
 
 // ---- Utilidades -----------------------------------------------------------
 
@@ -492,119 +493,148 @@ class SectionLabel extends St.Label {
     }
 });
 
-// ---- Desglose por categorías (barra segmentada + leyenda) -----------------
+// ---- Tooltip flotante ------------------------------------------------------
+//
+// Pequeña etiqueta que se muestra junto al cursor al pasar sobre un segmento,
+// indicando la categoría y su porcentaje. Vive en el uiGroup para quedar por
+// encima de todo.
 
-const BreakdownBox = GObject.registerClass(
-class BreakdownBox extends St.BoxLayout {
+const SegTooltip = GObject.registerClass(
+class SegTooltip extends St.Label {
     _init() {
-        super._init({
-            orientation: Clutter.Orientation.VERTICAL,
-            x_expand: true,
-            style_class: 'drm-breakdown',
-        });
+        super._init({style_class: 'drm-tooltip'});
+        this.hide();
+        Main.layoutManager.uiGroup.add_child(this);
+    }
 
-        // Barra segmentada: cada segmento de color = una categoría. El resto
-        // (hasta BAR_WIDTH) queda con el fondo = espacio libre.
+    showAt(text) {
+        this.text = text;
+        const [x, y] = global.get_pointer();
+        let tx = x + 14;
+        let ty = y + 12;
+        const monitor = Main.layoutManager.primaryMonitor;
+        const w = this.get_width();
+        if (monitor && tx + w > monitor.x + monitor.width)
+            tx = x - w - 10;
+        this.set_position(Math.round(tx), Math.round(ty));
+        this.show();
+    }
+
+    hideTip() {
+        this.hide();
+    }
+});
+
+// ---- Fila de disco con barra segmentada por categorías --------------------
+//
+// nombre | barra segmentada (el «gráfico») | capacidad. El análisis se lanza
+// solo (al cargar la sesión y cada 4 h); no hay botón. Al pasar sobre un
+// segmento aparece el tooltip con la categoría y su porcentaje.
+
+const SegmentRow = GObject.registerClass(
+class SegmentRow extends St.BoxLayout {
+    _init(disk, tooltip, getCancellable) {
+        super._init({
+            style_class: 'drm-row',
+            orientation: Clutter.Orientation.HORIZONTAL,
+            x_expand: true,
+        });
+        this._mount = disk.mount;
+        this._tooltip = tooltip;
+        this._getCancellable = getCancellable;
+        this._total = 0;
+
+        // Bloque de nombre (etiqueta + dispositivo · modelo · montaje).
+        this._nameBox = new St.BoxLayout({
+            orientation: Clutter.Orientation.VERTICAL,
+            style_class: 'drm-namebox',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._name = new St.Label({text: disk.name, style_class: 'drm-name'});
+        this._sub = new St.Label({text: disk.sub, style_class: 'drm-sub'});
+        this._sub.clutter_text.line_wrap = true;
+        this._nameBox.add_child(this._name);
+        this._nameBox.add_child(this._sub);
+        this.add_child(this._nameBox);
+
+        // Barra: contenedor de ancho fijo (capacidad); los segmentos ocupan la
+        // zona usada y el fondo blanco restante es el espacio libre.
         this._bar = new St.BoxLayout({
             orientation: Clutter.Orientation.HORIZONTAL,
-            style_class: 'drm-segbar',
+            style_class: 'drm-bar-bg',
             width: BAR_WIDTH,
+            y_align: Clutter.ActorAlign.CENTER,
             clip_to_allocation: true,
         });
         this.add_child(this._bar);
 
-        // Leyenda con color + etiqueta + tamaño por categoría.
-        this._legend = new St.BoxLayout({
-            orientation: Clutter.Orientation.VERTICAL,
-            style_class: 'drm-legend',
+        // Capacidad total (texto a la derecha).
+        this._totalBox = new St.Label({
+            text: '',
+            style_class: 'drm-total-text',
+            y_align: Clutter.ActorAlign.CENTER,
         });
-        this.add_child(this._legend);
+        this.add_child(this._totalBox);
     }
 
-    setData(result, capacity) {
-        this._bar.destroy_all_children();
-        this._legend.destroy_all_children();
-
+    _addSegment(key, label, bytes, capacity) {
         const inner = BAR_WIDTH - 2;
-        for (const r of result) {
-            const w = capacity > 0
-                ? Math.max(0, Math.round((r.bytes / capacity) * inner))
-                : 0;
-            // Segmento de la barra.
-            this._bar.add_child(new St.Widget({
-                style_class: `drm-seg drm-seg-${r.key}`,
-                width: w,
-                y_expand: true,
-            }));
-
-            // Fila de leyenda.
-            const lrow = new St.BoxLayout({
-                orientation: Clutter.Orientation.HORIZONTAL,
-                style_class: 'drm-legrow',
-            });
-            lrow.add_child(new St.Widget({
-                style_class: `drm-seg drm-seg-${r.key} drm-swatch`,
-                y_align: Clutter.ActorAlign.CENTER,
-            }));
-            lrow.add_child(new St.Label({
-                text: `${r.label} — ${fmtSize(r.bytes)}`,
-                style_class: 'drm-legtext',
-                y_align: Clutter.ActorAlign.CENTER,
-            }));
-            this._legend.add_child(lrow);
-        }
-    }
-});
-
-// Entrada de disco: fila medidor + botón «Analizar» + desglose (oculto).
-const DiskEntry = GObject.registerClass(
-class DiskEntry extends St.BoxLayout {
-    _init(disk, getCancellable) {
-        super._init({
-            orientation: Clutter.Orientation.VERTICAL,
-            x_expand: true,
-            style_class: 'drm-entry',
+        const frac = capacity > 0 ? bytes / capacity : 0;
+        const w = Math.max(0, Math.round(frac * inner));
+        if (w <= 0)
+            return;
+        const pct = Math.round(frac * 100);
+        const seg = new St.Widget({
+            style_class: `drm-seg drm-seg-${key}`,
+            width: w,
+            y_expand: true,
+            reactive: true,
+            track_hover: true,
         });
-        this._mount = disk.mount;
-        this._getCancellable = getCancellable;
-        this._used = 0;
-        this._total = 0;
-
-        this.row = new MeterRow(disk.name, disk.sub);
-        this.add_child(this.row);
-
-        this._btn = new St.Button({
-            label: 'Analizar uso',
-            style_class: 'drm-analyze',
-            x_align: Clutter.ActorAlign.START,
+        const text = `${label} — ${pct}%  (${fmtSize(bytes)})`;
+        seg.connect('enter-event', () => {
+            this._tooltip.showAt(text);
+            return Clutter.EVENT_PROPAGATE;
         });
-        this._btn.connect('clicked', () => this._analyze());
-        this.add_child(this._btn);
-
-        this._breakdown = new BreakdownBox();
-        this._breakdown.visible = false;
-        this.add_child(this._breakdown);
+        seg.connect('motion-event', () => {
+            this._tooltip.showAt(text);
+            return Clutter.EVENT_PROPAGATE;
+        });
+        seg.connect('leave-event', () => {
+            this._tooltip.hideTip();
+            return Clutter.EVENT_PROPAGATE;
+        });
+        this._bar.add_child(seg);
     }
 
-    update(used, total) {
-        this._used = used;
+    // Vista provisional (un único segmento «Usado») mientras se escanea.
+    setProvisional(used, total) {
         this._total = total;
-        this.row.update(used, total);
+        this._totalBox.text = fmtSize(total);
+        this._bar.destroy_all_children();
+        this._addSegment('otros', 'Usado', used, total);
     }
 
-    _analyze() {
-        this._btn.reactive = false;
-        this._btn.label = 'Analizando…';
-        const total = this._total;
-        analyzeMount(this._mount, this._used, this._getCancellable(), (result) => {
-            // El widget puede haberse destruido mientras escaneaba.
-            if (!this._breakdown || this._breakdown.get_stage() === null) {
+    // Vista final con el desglose por categorías.
+    setBreakdown(result, capacity) {
+        this._total = capacity;
+        this._totalBox.text = fmtSize(capacity);
+        this._bar.destroy_all_children();
+        for (const r of result)
+            this._addSegment(r.key, r.label, r.bytes, capacity);
+    }
+
+    // Lanza el escaneo (provisional inmediato + desglose asíncrono).
+    analyze() {
+        const cancellable = this._getCancellable();
+        const {used, total} = readDiskUsage(this._mount);
+        this.setProvisional(used, total);
+        analyzeMount(this._mount, used, cancellable, (result) => {
+            if (this.get_stage() === null)
                 return;
-            }
-            this._breakdown.setData(result, total);
-            this._breakdown.visible = true;
-            this._btn.label = 'Volver a analizar';
-            this._btn.reactive = true;
+            if (cancellable && cancellable.is_cancelled())
+                return;
+            this.setBreakdown(result, total);
         });
     }
 });
@@ -644,20 +674,72 @@ class Indicator extends PanelMenu.Button {
         this._item.add_child(this._box);
         this.menu.addMenuItem(this._item);
 
+        // Separador + leyenda de colores (horizontal) en la parte inferior.
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this.menu.addMenuItem(this._buildLegend());
+
         // Estado interno.
-        this._diskRows = new Map();     // device -> DiskEntry
+        this._diskRows = new Map();     // device -> SegmentRow
         this._ramRow = null;
         this._diskKey = '';             // firma del conjunto de discos actual
         this._cancellable = new Gio.Cancellable();
 
+        // Tooltip flotante compartido (categoría + % al pasar el cursor).
+        this._tooltip = new SegTooltip();
+
         // Refrescar al abrir el menú.
         this.menu.connect('open-state-changed', (_menu, open) => {
             if (open)
-                this._refresh();
+                this._tick();
         });
 
-        // Cancelar cualquier escaneo en curso al destruir el indicador.
-        this.connect('destroy', () => this._cancellable.cancel());
+        // Limpieza al destruir el indicador.
+        this.connect('destroy', () => {
+            this._cancellable.cancel();
+            if (this._tooltip) {
+                this._tooltip.destroy();
+                this._tooltip = null;
+            }
+        });
+    }
+
+    // Leyenda horizontal de categorías para la parte inferior del menú.
+    _buildLegend() {
+        const item = new PopupMenu.PopupBaseMenuItem({
+            reactive: false,
+            can_focus: false,
+        });
+        const box = new St.BoxLayout({
+            orientation: Clutter.Orientation.HORIZONTAL,
+            style_class: 'drm-legend-footer',
+            x_expand: true,
+        });
+        const cats = [
+            {key: 'sistema', label: 'Sistema'},
+            {key: 'apps', label: 'Aplicaciones'},
+            {key: 'usuario', label: 'Usuario'},
+            {key: 'temp', label: 'Temporales'},
+            {key: 'logs', label: 'Logs'},
+            {key: 'otros', label: 'Otros'},
+        ];
+        for (const c of cats) {
+            const cell = new St.BoxLayout({
+                orientation: Clutter.Orientation.HORIZONTAL,
+                style_class: 'drm-legrow',
+            });
+            cell.add_child(new St.Widget({
+                style_class: `drm-seg drm-seg-${c.key} drm-swatch`,
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+            cell.add_child(new St.Label({
+                text: c.label,
+                style_class: 'drm-legtext',
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+            box.add_child(cell);
+        }
+        item.add_child(box);
+        return item;
     }
 
     // (Re)construye las filas si cambió el conjunto de discos montados.
@@ -673,9 +755,9 @@ class Indicator extends PanelMenu.Button {
             }));
         }
         for (const disk of disks) {
-            const entry = new DiskEntry(disk, () => this._cancellable);
-            this._box.add_child(entry);
-            this._diskRows.set(disk.device, entry);
+            const row = new SegmentRow(disk, this._tooltip, () => this._cancellable);
+            this._box.add_child(row);
+            this._diskRows.set(disk.device, row);
         }
 
         this._box.add_child(new SectionLabel('Memoria RAM'));
@@ -683,27 +765,39 @@ class Indicator extends PanelMenu.Button {
         this._box.add_child(this._ramRow);
     }
 
-    _refresh() {
+    // Comprueba el conjunto de discos y reconstruye si cambió. Devuelve true
+    // si se reconstruyó (hay que relanzar el análisis).
+    _ensureRows() {
         const disks = listDisks();
-
-        // Firma del conjunto (dispositivo + nombre + detalle) para detectar cambios.
         const key = disks.map(d => `${d.device}|${d.name}|${d.sub}`).join('\n');
         if (key !== this._diskKey) {
             this._diskKey = key;
             this._rebuild(disks);
+            return true;
         }
+        return false;
+    }
 
-        for (const disk of disks) {
-            const row = this._diskRows.get(disk.device);
-            if (!row)
-                continue;
-            const {used, total} = readDiskUsage(disk.mount);
-            row.update(used, total);
-        }
+    // Refresco ligero (cada pocos segundos): RAM en vivo + detección de
+    // unidades. NO re-escanea el disco; eso ocurre solo en analyzeAll().
+    _tick() {
+        const rebuilt = this._ensureRows();
 
         if (this._ramRow) {
             const ram = readRam();
             this._ramRow.update(ram.used, ram.total);
+        }
+
+        // Al conectar/retirar una unidad hay que analizarla.
+        if (rebuilt)
+            this.analyzeAll();
+    }
+
+    // Escaneo por categorías de todas las unidades (al cargar y cada 4 h).
+    analyzeAll() {
+        for (const row of this._diskRows.values()) {
+            if (typeof row.analyze === 'function')
+                row.analyze();
         }
     }
 });
@@ -714,20 +808,33 @@ export default class DiskRamMonitorExtension extends Extension {
     enable() {
         this._indicator = new Indicator();
         Main.panel.addToStatusArea(this.uuid, this._indicator);
-        this._indicator._refresh();
 
-        // Actualización periódica en segundo plano.
-        this._timeout = GLib.timeout_add_seconds(
+        // Construye las filas y lanza el PRIMER análisis (al cargar la sesión).
+        this._indicator._tick();
+
+        // Refresco ligero de la RAM y detección de unidades conectadas.
+        this._refreshTimeout = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT, REFRESH_SECONDS, () => {
-                this._indicator._refresh();
+                this._indicator._tick();
+                return GLib.SOURCE_CONTINUE;
+            });
+
+        // Re-análisis por categorías cada 4 horas.
+        this._analyzeTimeout = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT, ANALYZE_SECONDS, () => {
+                this._indicator.analyzeAll();
                 return GLib.SOURCE_CONTINUE;
             });
     }
 
     disable() {
-        if (this._timeout) {
-            GLib.Source.remove(this._timeout);
-            this._timeout = null;
+        if (this._refreshTimeout) {
+            GLib.Source.remove(this._refreshTimeout);
+            this._refreshTimeout = null;
+        }
+        if (this._analyzeTimeout) {
+            GLib.Source.remove(this._analyzeTimeout);
+            this._analyzeTimeout = null;
         }
         if (this._indicator) {
             this._indicator.destroy();
