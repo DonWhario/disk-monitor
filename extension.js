@@ -450,6 +450,8 @@ class MeterRow extends St.BoxLayout {
         this._totalBox = new St.Label({
             text: '',
             style_class: 'drm-total-text',
+            x_expand: true,
+            x_align: Clutter.ActorAlign.END,
             y_align: Clutter.ActorAlign.CENTER,
         });
         this.add_child(this._totalBox);
@@ -572,6 +574,8 @@ class SegmentRow extends St.BoxLayout {
         this._totalBox = new St.Label({
             text: '',
             style_class: 'drm-total-text',
+            x_expand: true,
+            x_align: Clutter.ActorAlign.END,
             y_align: Clutter.ActorAlign.CENTER,
         });
         this.add_child(this._totalBox);
@@ -644,7 +648,8 @@ class SegmentRow extends St.BoxLayout {
 const Indicator = GObject.registerClass(
 class Indicator extends PanelMenu.Button {
     _init() {
-        super._init(0.0, 'Disk & RAM Monitor', false);
+        // 0.5 = el menú se centra horizontalmente bajo el botón de la barra.
+        super._init(0.5, 'Disk & RAM Monitor', false);
 
         // Ícono en el panel.
         this._icon = new St.Icon({
