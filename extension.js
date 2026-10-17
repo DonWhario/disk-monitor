@@ -520,6 +520,10 @@ class SegTooltip extends St.Label {
             tx = x - w - 10;
         this.set_position(Math.round(tx), Math.round(ty));
         this.show();
+        // Elevar al frente: el menú se abre después y quedaría por encima.
+        const parent = this.get_parent();
+        if (parent)
+            parent.set_child_above_sibling(this, null);
     }
 
     hideTip() {
